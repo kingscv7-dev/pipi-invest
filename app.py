@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, os, re, shutil, threading, urllib.request, urllib.parse, urllib.error, webbrowser, secrets
+import json, os, re, shutil, threading, urllib.request, urllib.parse, urllib.error, webbrowser, secrets, hashlib
 from datetime import date, datetime, timedelta, timezone
 from flask import Flask, flash, jsonify, redirect, render_template, request, send_file, url_for, session, Response
 import core
@@ -11,32 +11,59 @@ os.makedirs(DATA_DIR, exist_ok=True)
 DB=os.path.join(DATA_DIR,core.DB_NAME); core.init_db(DB)
 _tmp=core.connect(DB); finance.init_db(_tmp); _tmp.close()
 app=Flask(__name__)
-app.secret_key=os.environ.get('PIPI_SECRET_KEY') or 'pipi-invest-local-v4-change-me'
-app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', SESSION_COOKIE_SECURE=os.environ.get('PIPI_HTTPS','0')=='1')
 PIPI_PASSWORD=os.environ.get('PIPI_PASSWORD','').strip()
+PIPI_CLOUD=(os.environ.get('PIPI_CLOUD','0')=='1' or bool(os.environ.get('RAILWAY_ENVIRONMENT')) or bool(os.environ.get('RAILWAY_SERVICE_NAME')))
+# Keep setup simple on Railway: only PIPI_PASSWORD is required.
+# A stable secret is derived from the password when PIPI_SECRET_KEY is not supplied.
+_secret=os.environ.get('PIPI_SECRET_KEY','').strip()
+if not _secret:
+    _secret=hashlib.sha256((PIPI_PASSWORD or 'pipi-invest-local-v4.1') .encode('utf-8') + b'|session-key').hexdigest()
+app.secret_key=_secret
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=(PIPI_CLOUD or os.environ.get('PIPI_HTTPS','0')=='1'),
+)
+AUTH_VERSION=hashlib.sha256(PIPI_PASSWORD.encode('utf-8')).hexdigest()[:16] if PIPI_PASSWORD else ''
 PID_FILE=os.path.join(BASE,'vr7.pid')
 
 
 @app.before_request
 def _auth_gate():
-    # Local mode may run without a password. Cloud deployments should set PIPI_PASSWORD.
+    # Static/PWA shell and login page must remain reachable before authentication.
+    if request.endpoint in {'login','manifest','service_worker','auth_setup_required'} or request.path.startswith('/static/'):
+        return None
+    # Railway/cloud must never expose investment data without a password.
+    if PIPI_CLOUD and not PIPI_PASSWORD:
+        return redirect(url_for('auth_setup_required'))
+    # Local desktop mode may still run without a password.
     if not PIPI_PASSWORD:
         return None
-    if request.endpoint in {'login','manifest','service_worker'} or request.path.startswith('/static/'):
+    # Password changes invalidate every old browser session automatically.
+    if session.get('pipi_auth') is True and session.get('auth_version') == AUTH_VERSION:
         return None
-    if session.get('pipi_auth') is True:
-        return None
+    session.clear()
     next_url=request.full_path if request.query_string else request.path
     return redirect(url_for('login', next=next_url))
 
+@app.get('/auth-setup-required')
+def auth_setup_required():
+    if PIPI_PASSWORD:
+        return redirect(url_for('login'))
+    return render_template('auth_setup_required.html'), 503
+
 @app.route('/login', methods=['GET','POST'])
 def login():
+    if PIPI_CLOUD and not PIPI_PASSWORD:
+        return redirect(url_for('auth_setup_required'))
     if not PIPI_PASSWORD:
         return redirect(url_for('dashboard_page'))
     if request.method=='POST':
         pw=request.form.get('password','')
         if secrets.compare_digest(pw, PIPI_PASSWORD):
-            session.clear(); session['pipi_auth']=True
+            session.clear()
+            session['pipi_auth']=True
+            session['auth_version']=AUTH_VERSION
             nxt=request.args.get('next') or url_for('dashboard_page')
             if not nxt.startswith('/') or nxt.startswith('//'):
                 nxt=url_for('dashboard_page')
