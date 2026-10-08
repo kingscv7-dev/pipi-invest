@@ -10,7 +10,6 @@ DATA_DIR=os.environ.get('PIPI_DATA_DIR', BASE)
 os.makedirs(DATA_DIR, exist_ok=True)
 DB=os.path.join(DATA_DIR,core.DB_NAME); core.init_db(DB)
 _tmp=core.connect(DB); finance.init_db(_tmp); _tmp.close()
-app=Flask(__name__)
 # Cloud authentication supports either Railway environment variables or a persistent
 # password configured once from the web UI and stored as a salted hash in /data.
 PIPI_CLOUD=(os.environ.get('PIPI_CLOUD','0')=='1' or bool(os.environ.get('RAILWAY_ENVIRONMENT')) or bool(os.environ.get('RAILWAY_SERVICE_NAME')))
@@ -98,17 +97,6 @@ print(
 
 PID_FILE=os.path.join(BASE,'vr7.pid')
 
-# Safe startup diagnostics: never print the password value.
-print(
-    '[PIPI AUTH] '+
-    f'cloud={"ON" if PIPI_CLOUD else "OFF"} '+
-    f'password={"SET" if PIPI_PASSWORD else "MISSING"} '+
-    f'source={PIPI_PASSWORD_SOURCE or "NONE"} '+
-    f'length={len(PIPI_PASSWORD)} '+
-    f'data_dir={DATA_DIR}',
-    flush=True,
-)
-
 @app.get('/auth-status')
 def auth_status():
     return jsonify({
@@ -118,7 +106,7 @@ def auth_status():
         'data_dir': DATA_DIR,
         'auth_file_exists': os.path.exists(AUTH_FILE),
         'railway_service_detected': bool(os.environ.get('RAILWAY_SERVICE_NAME')),
-        'version': '4.3',
+        'version': '4.4',
     })
 
 @app.before_request
