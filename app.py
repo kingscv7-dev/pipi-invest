@@ -11,7 +11,9 @@ os.makedirs(DATA_DIR, exist_ok=True)
 DB=os.path.join(DATA_DIR,core.DB_NAME); core.init_db(DB)
 _tmp=core.connect(DB); finance.init_db(_tmp); _tmp.close()
 app=Flask(__name__)
-PIPI_PASSWORD=os.environ.get('PIPI_PASSWORD','').strip()
+# Prefer PIPI_PASSWORD. APP_PASSWORD is accepted as a compatibility fallback.
+PIPI_PASSWORD_SOURCE='PIPI_PASSWORD' if os.environ.get('PIPI_PASSWORD','').strip() else ('APP_PASSWORD' if os.environ.get('APP_PASSWORD','').strip() else '')
+PIPI_PASSWORD=(os.environ.get('PIPI_PASSWORD','').strip() or os.environ.get('APP_PASSWORD','').strip())
 PIPI_CLOUD=(os.environ.get('PIPI_CLOUD','0')=='1' or bool(os.environ.get('RAILWAY_ENVIRONMENT')) or bool(os.environ.get('RAILWAY_SERVICE_NAME')))
 # Keep setup simple on Railway: only PIPI_PASSWORD is required.
 # A stable secret is derived from the password when PIPI_SECRET_KEY is not supplied.
@@ -27,11 +29,35 @@ app.config.update(
 AUTH_VERSION=hashlib.sha256(PIPI_PASSWORD.encode('utf-8')).hexdigest()[:16] if PIPI_PASSWORD else ''
 PID_FILE=os.path.join(BASE,'vr7.pid')
 
+# Safe startup diagnostics: never print the password value.
+print(
+    '[PIPI AUTH] '+
+    f'cloud={"ON" if PIPI_CLOUD else "OFF"} '+
+    f'password={"SET" if PIPI_PASSWORD else "MISSING"} '+
+    f'source={PIPI_PASSWORD_SOURCE or "NONE"} '+
+    f'length={len(PIPI_PASSWORD)} '+
+    f'data_dir={DATA_DIR}',
+    flush=True,
+)
+
+@app.get('/auth-status')
+def auth_status():
+    # Diagnostic endpoint intentionally exposes status only, never secret values.
+    return jsonify({
+        'cloud': bool(PIPI_CLOUD),
+        'password_status': 'SET' if PIPI_PASSWORD else 'MISSING',
+        'password_source': PIPI_PASSWORD_SOURCE or 'NONE',
+        'password_length': len(PIPI_PASSWORD),
+        'data_dir': DATA_DIR,
+        'railway_service_detected': bool(os.environ.get('RAILWAY_SERVICE_NAME')),
+        'version': '4.2',
+    })
+
 
 @app.before_request
 def _auth_gate():
     # Static/PWA shell and login page must remain reachable before authentication.
-    if request.endpoint in {'login','manifest','service_worker','auth_setup_required'} or request.path.startswith('/static/'):
+    if request.endpoint in {'login','manifest','service_worker','auth_setup_required','auth_status'} or request.path.startswith('/static/'):
         return None
     # Railway/cloud must never expose investment data without a password.
     if PIPI_CLOUD and not PIPI_PASSWORD:
