@@ -11,22 +11,91 @@ os.makedirs(DATA_DIR, exist_ok=True)
 DB=os.path.join(DATA_DIR,core.DB_NAME); core.init_db(DB)
 _tmp=core.connect(DB); finance.init_db(_tmp); _tmp.close()
 app=Flask(__name__)
-# Prefer PIPI_PASSWORD. APP_PASSWORD is accepted as a compatibility fallback.
-PIPI_PASSWORD_SOURCE='PIPI_PASSWORD' if os.environ.get('PIPI_PASSWORD','').strip() else ('APP_PASSWORD' if os.environ.get('APP_PASSWORD','').strip() else '')
-PIPI_PASSWORD=(os.environ.get('PIPI_PASSWORD','').strip() or os.environ.get('APP_PASSWORD','').strip())
+# Cloud authentication supports either Railway environment variables or a persistent
+# password configured once from the web UI and stored as a salted hash in /data.
 PIPI_CLOUD=(os.environ.get('PIPI_CLOUD','0')=='1' or bool(os.environ.get('RAILWAY_ENVIRONMENT')) or bool(os.environ.get('RAILWAY_SERVICE_NAME')))
-# Keep setup simple on Railway: only PIPI_PASSWORD is required.
-# A stable secret is derived from the password when PIPI_SECRET_KEY is not supplied.
+ENV_PASSWORD=(os.environ.get('PIPI_PASSWORD','').strip() or os.environ.get('APP_PASSWORD','').strip())
+ENV_PASSWORD_SOURCE='PIPI_PASSWORD' if os.environ.get('PIPI_PASSWORD','').strip() else ('APP_PASSWORD' if os.environ.get('APP_PASSWORD','').strip() else '')
+AUTH_FILE=os.path.join(DATA_DIR,'pipi_auth.json')
+
+def _load_file_auth():
+    try:
+        with open(AUTH_FILE,'r',encoding='utf-8') as fp:
+            obj=json.load(fp)
+        if obj.get('salt') and obj.get('password_hash') and obj.get('session_secret'):
+            return obj
+    except Exception:
+        pass
+    return None
+
+FILE_AUTH=_load_file_auth()
+AUTH_CONFIGURED=bool(ENV_PASSWORD or FILE_AUTH)
+PIPI_PASSWORD_SOURCE=ENV_PASSWORD_SOURCE or ('DATA_VOLUME' if FILE_AUTH else '')
+
+def _verify_password(candidate: str) -> bool:
+    if ENV_PASSWORD:
+        return secrets.compare_digest(candidate, ENV_PASSWORD)
+    if FILE_AUTH:
+        try:
+            salt=bytes.fromhex(FILE_AUTH['salt'])
+            test=hashlib.pbkdf2_hmac('sha256',candidate.encode('utf-8'),salt,260000).hex()
+            return secrets.compare_digest(test,FILE_AUTH['password_hash'])
+        except Exception:
+            return False
+    return False
+
+def _save_password_to_volume(password: str):
+    global FILE_AUTH, AUTH_CONFIGURED, PIPI_PASSWORD_SOURCE, AUTH_VERSION
+    salt=secrets.token_bytes(16)
+    obj={
+        'salt':salt.hex(),
+        'password_hash':hashlib.pbkdf2_hmac('sha256',password.encode('utf-8'),salt,260000).hex(),
+        'session_secret':secrets.token_hex(32),
+        'created_at':datetime.now(timezone.utc).isoformat(),
+    }
+    tmp=AUTH_FILE+'.tmp'
+    with open(tmp,'w',encoding='utf-8') as fp:
+        json.dump(obj,fp,ensure_ascii=False)
+    os.replace(tmp,AUTH_FILE)
+    FILE_AUTH=obj
+    AUTH_CONFIGURED=True
+    PIPI_PASSWORD_SOURCE='DATA_VOLUME'
+    AUTH_VERSION=obj['password_hash'][:16]
+    app.secret_key=obj['session_secret']
+
+app=Flask(__name__)
 _secret=os.environ.get('PIPI_SECRET_KEY','').strip()
 if not _secret:
-    _secret=hashlib.sha256((PIPI_PASSWORD or 'pipi-invest-local-v4.1') .encode('utf-8') + b'|session-key').hexdigest()
+    if FILE_AUTH:
+        _secret=FILE_AUTH['session_secret']
+    elif ENV_PASSWORD:
+        _secret=hashlib.sha256(ENV_PASSWORD.encode('utf-8')+b'|session-key').hexdigest()
+    else:
+        # Temporary only until the first password is configured.
+        _secret=hashlib.sha256(b'pipi-invest-v4.3-first-setup').hexdigest()
 app.secret_key=_secret
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
     SESSION_COOKIE_SECURE=(PIPI_CLOUD or os.environ.get('PIPI_HTTPS','0')=='1'),
 )
-AUTH_VERSION=hashlib.sha256(PIPI_PASSWORD.encode('utf-8')).hexdigest()[:16] if PIPI_PASSWORD else ''
+if ENV_PASSWORD:
+    AUTH_VERSION=hashlib.sha256(ENV_PASSWORD.encode('utf-8')).hexdigest()[:16]
+elif FILE_AUTH:
+    AUTH_VERSION=FILE_AUTH['password_hash'][:16]
+else:
+    AUTH_VERSION=''
+
+# Safe startup diagnostics: never print any password value.
+print(
+    '[PIPI AUTH] '+
+    f'cloud={"ON" if PIPI_CLOUD else "OFF"} '+
+    f'auth={"SET" if AUTH_CONFIGURED else "MISSING"} '+
+    f'source={PIPI_PASSWORD_SOURCE or "NONE"} '+
+    f'data_dir={DATA_DIR}',
+    flush=True,
+)
+
 PID_FILE=os.path.join(BASE,'vr7.pid')
 
 # Safe startup diagnostics: never print the password value.
@@ -42,51 +111,62 @@ print(
 
 @app.get('/auth-status')
 def auth_status():
-    # Diagnostic endpoint intentionally exposes status only, never secret values.
     return jsonify({
         'cloud': bool(PIPI_CLOUD),
-        'password_status': 'SET' if PIPI_PASSWORD else 'MISSING',
+        'password_status': 'SET' if AUTH_CONFIGURED else 'MISSING',
         'password_source': PIPI_PASSWORD_SOURCE or 'NONE',
-        'password_length': len(PIPI_PASSWORD),
         'data_dir': DATA_DIR,
+        'auth_file_exists': os.path.exists(AUTH_FILE),
         'railway_service_detected': bool(os.environ.get('RAILWAY_SERVICE_NAME')),
-        'version': '4.2',
+        'version': '4.3',
     })
-
 
 @app.before_request
 def _auth_gate():
-    # Static/PWA shell and login page must remain reachable before authentication.
-    if request.endpoint in {'login','manifest','service_worker','auth_setup_required','auth_status'} or request.path.startswith('/static/'):
+    if request.endpoint in {'login','setup_password','manifest','service_worker','auth_status'} or request.path.startswith('/static/'):
         return None
-    # Railway/cloud must never expose investment data without a password.
-    if PIPI_CLOUD and not PIPI_PASSWORD:
-        return redirect(url_for('auth_setup_required'))
-    # Local desktop mode may still run without a password.
-    if not PIPI_PASSWORD:
+    if PIPI_CLOUD and not AUTH_CONFIGURED:
+        return redirect(url_for('setup_password'))
+    if not AUTH_CONFIGURED:
         return None
-    # Password changes invalidate every old browser session automatically.
     if session.get('pipi_auth') is True and session.get('auth_version') == AUTH_VERSION:
         return None
     session.clear()
     next_url=request.full_path if request.query_string else request.path
     return redirect(url_for('login', next=next_url))
 
-@app.get('/auth-setup-required')
-def auth_setup_required():
-    if PIPI_PASSWORD:
+@app.route('/setup-password',methods=['GET','POST'])
+def setup_password():
+    if AUTH_CONFIGURED:
         return redirect(url_for('login'))
-    return render_template('auth_setup_required.html'), 503
-
-@app.route('/login', methods=['GET','POST'])
-def login():
-    if PIPI_CLOUD and not PIPI_PASSWORD:
-        return redirect(url_for('auth_setup_required'))
-    if not PIPI_PASSWORD:
+    if not PIPI_CLOUD:
         return redirect(url_for('dashboard_page'))
     if request.method=='POST':
         pw=request.form.get('password','')
-        if secrets.compare_digest(pw, PIPI_PASSWORD):
+        pw2=request.form.get('password_confirm','')
+        if len(pw)<6:
+            flash('비밀번호는 6자 이상으로 설정해 주세요.','err')
+        elif pw!=pw2:
+            flash('비밀번호 확인이 일치하지 않습니다.','err')
+        else:
+            try:
+                _save_password_to_volume(pw)
+                session.clear()
+                flash('로그인 비밀번호가 설정되었습니다.','ok')
+                return redirect(url_for('login'))
+            except Exception as e:
+                flash(f'비밀번호 저장 실패: {e}','err')
+    return render_template('setup_password.html')
+
+@app.route('/login', methods=['GET','POST'])
+def login():
+    if PIPI_CLOUD and not AUTH_CONFIGURED:
+        return redirect(url_for('setup_password'))
+    if not AUTH_CONFIGURED:
+        return redirect(url_for('dashboard_page'))
+    if request.method=='POST':
+        pw=request.form.get('password','')
+        if _verify_password(pw):
             session.clear()
             session['pipi_auth']=True
             session['auth_version']=AUTH_VERSION
