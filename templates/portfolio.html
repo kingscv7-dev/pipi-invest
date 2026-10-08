@@ -1,0 +1,71 @@
+{% extends 'base.html' %}{% block content %}
+<div class="hero"><div><h1>포트폴리오</h1><p>매수·매도만 기록하면 보유수량, 평단가, 평가손익과 실현손익을 자동 계산합니다.</p></div></div>
+
+<div class="metricgrid">
+{% for cur in ['KRW','USD'] %}{% set t=totals.get(cur) %}<div class="metric"><span>{{cur}} 평가금액</span><b>{% if cur=='KRW' %}₩{% else %}${% endif %}{{'{:,.2f}'.format(t.market_value if t else 0)}}</b><small>원가 {% if cur=='KRW' %}₩{% else %}${% endif %}{{'{:,.2f}'.format(t.cost_basis if t else 0)}}</small></div><div class="metric"><span>{{cur}} 평가손익</span><b class="{{'red' if t and t.unrealized>=0 else 'blue'}}">{% if cur=='KRW' %}₩{% else %}${% endif %}{{'{:+,.2f}'.format(t.unrealized if t else 0)}}</b><small>실현 {% if cur=='KRW' %}₩{% else %}${% endif %}{{'{:+,.2f}'.format(t.realized if t else 0)}}</small></div>{% endfor %}
+</div>
+
+<section class="panel nh-panel">
+  <div class="panelhead">
+    <div><h2>NH 체결문자 붙여넣기</h2><p>NH투자증권 체결 안내 문자를 그대로 붙여넣으면 거래일·주문번호·종목·수량·체결가를 자동으로 읽습니다.</p></div>
+  </div>
+  <form method="post" action="{{url_for('portfolio_nh_preview')}}" class="nh-paste-form">
+    <textarea name="nh_text" rows="8" placeholder="[NH투자증권] 국내소수점 주문체결 안내&#10;주문종류 : 매수 2회차&#10;주문일자 : 10월08일&#10;..." required>{{nh_raw or ''}}</textarea>
+    <button class="primary">문자 분석</button>
+  </form>
+  {% if nh_preview %}
+  <div class="nh-preview {{'dup' if nh_preview.duplicate else ''}}">
+    <div class="nh-preview-title"><b>분석 결과</b>{% if nh_preview.duplicate %}<span>중복 주문번호</span>{% endif %}</div>
+    <div class="nh-preview-grid">
+      <div><span>거래</span><b>{{nh_preview.side_label}}</b></div>
+      <div><span>거래일</span><b>{{nh_preview.trade_date}}</b></div>
+      <div><span>주문번호</span><b>{{nh_preview.order_no}}</b></div>
+      <div><span>종목</span><b>{{nh_preview.name}}</b></div>
+      <div><span>체결수량</span><b>{{'{:,.6f}'.format(nh_preview.qty)}}주</b></div>
+      <div><span>체결가</span><b>₩{{'{:,.0f}'.format(nh_preview.price)}}</b></div>
+      <div><span>체결금액</span><b>₩{{'{:,.0f}'.format(nh_preview.fill_amount)}}</b></div>
+      <div><span>주문금액</span><b>₩{{'{:,.0f}'.format(nh_preview.order_amount)}}</b></div>
+    </div>
+    {% if securities %}
+    <form method="post" action="{{url_for('portfolio_nh_save')}}" class="nh-save-form">
+      <input type="hidden" name="trade_date" value="{{nh_preview.trade_date}}">
+      <input type="hidden" name="side" value="{{nh_preview.side}}">
+      <input type="hidden" name="qty" value="{{nh_preview.qty}}">
+      <input type="hidden" name="price" value="{{nh_preview.price}}">
+      <input type="hidden" name="fill_amount" value="{{nh_preview.fill_amount}}">
+      <input type="hidden" name="order_no" value="{{nh_preview.order_no}}">
+      <label>저장할 포트폴리오 종목
+        <select name="security_id" required>
+          {% for s in securities %}<option value="{{s.id}}" {{'selected' if nh_preview.matched_security_id==s.id else ''}}>[{{s.account_name}}] {{s.name}} · {{s.symbol}}</option>{% endfor %}
+        </select>
+      </label>
+      <button class="primary" {{'disabled' if nh_preview.duplicate else ''}}>포트폴리오에 저장</button>
+    </form>
+    {% else %}<div class="empty">먼저 포트폴리오 종목을 등록해 주세요.</div>{% endif %}
+  </div>
+  {% endif %}
+</section>
+
+<div class="grid2">
+<section class="panel"><h2>종목 등록</h2><form method="post" action="{{url_for('portfolio_security_add')}}" class="formgrid">
+<label>계좌명<input name="account_name" value="일반" required></label><label>시장<select name="market"><option value="KR">국내</option><option value="US">미국</option></select></label>
+<label>종목코드<input name="symbol" placeholder="005387 / TQQQ" required></label><label>종목명<input name="name" placeholder="현대차2우B / TQQQ" required></label>
+<label>통화<select name="currency"><option value="KRW">KRW</option><option value="USD">USD</option></select></label><label>자동조회 심볼 <small>선택</small><input name="quote_symbol" placeholder="005387.KS / TQQQ"></label>
+<label>현재가 <small>나중에 수정 가능</small><input name="current_price" type="number" step="0.0001" value="0"></label><button class="primary wide">종목 추가</button></form></section>
+<section class="panel"><h2>매수·매도 기록</h2>{% if securities %}<form method="post" action="{{url_for('portfolio_trade_add')}}" class="formgrid">
+<label>종목<select name="security_id">{% for s in securities %}<option value="{{s.id}}">[{{s.account_name}}] {{s.name}} · {{s.symbol}}</option>{% endfor %}</select></label><label>거래일<input name="trade_date" type="date" value="{{today}}" required></label>
+<label>구분<select name="side"><option value="BUY">매수</option><option value="SELL">매도</option></select></label><label>수량<input name="qty" type="number" step="0.000001" required></label>
+<label>체결가<input name="price" type="number" step="0.0001" required></label><label>수수료<input name="fee" type="number" step="0.01" value="0"></label><label>메모<input name="note"></label><button class="primary wide">거래 기록</button></form>{% else %}<div class="empty">먼저 종목을 등록해 주세요.</div>{% endif %}</section>
+</div>
+
+<section class="panel"><div class="panelhead"><div><h2>보유 종목</h2><p>현재가는 직접 입력하거나 조회 심볼로 자동 조회할 수 있습니다.</p></div></div><div class="scroll"><table class="holdings-table"><thead><tr><th>계좌</th><th>종목</th><th>통화</th><th>수량</th><th>평단</th><th>현재가</th><th>평가금액</th><th>평가손익</th><th>수익률</th><th>실현손익</th><th class="manage-head">현재가 관리</th></tr></thead><tbody>
+{% for h in holdings %}{% set s=h.security %}<tr><td>{{s.account_name}}</td><td><b>{{s.name}}</b><br><small>{{s.symbol}}</small></td><td>{{s.currency}}</td><td>{{'{:,.4f}'.format(h.qty)}}</td><td>{{'{:,.2f}'.format(h.avg_price)}}</td><td>{{'{:,.2f}'.format(h.current_price)}}</td><td>{{'{:,.2f}'.format(h.market_value)}}</td><td class="{{'red' if h.unrealized>=0 else 'blue'}}">{{'{:+,.2f}'.format(h.unrealized)}}</td><td class="{{'red' if h.return_pct>=0 else 'blue'}}">{{'{:+.2f}'.format(h.return_pct)}}%</td><td class="{{'red' if h.realized>=0 else 'blue'}}">{{'{:+,.2f}'.format(h.realized)}}</td><td class="manage-cell"><div class="price-toolbar">
+<form method="post" action="{{url_for('portfolio_price',sid=s.id)}}" class="price-inline"><input aria-label="가격입력" title="가격입력" name="current_price" type="number" step="0.0001" value="{{s.current_price}}"><button class="table-btn apply">적용</button></form>
+{% if s.quote_symbol or s.symbol %}<form method="post" action="{{url_for('portfolio_refresh',sid=s.id)}}"><button class="table-btn">자동조회</button></form>{% endif %}
+<a class="table-btn linkbox" href="{{url_for('portfolio_security_edit',sid=s.id)}}">수정</a>
+<form method="post" action="{{url_for('portfolio_security_delete',sid=s.id)}}" onsubmit="return confirm('종목을 삭제할까요? 거래/배당 기록이 있으면 삭제되지 않습니다.')"><button class="table-btn dangerbox">삭제</button></form>
+</div></td></tr>{% else %}<tr><td colspan="11">등록된 종목이 없습니다.</td></tr>{% endfor %}
+</tbody></table></div></section>
+
+<section class="panel"><h2>거래 내역</h2><div class="scroll"><table><thead><tr><th>거래일</th><th>계좌</th><th>종목</th><th>구분</th><th>수량</th><th>가격</th><th>수수료</th><th>등록경로</th><th>주문번호</th><th>메모</th><th></th></tr></thead><tbody>{% for t in trades %}<tr><td>{{t.trade_date}}</td><td>{{t.account_name}}</td><td>{{t.name}} <small>{{t.symbol}}</small></td><td class="{{'blue' if t.side=='BUY' else 'red'}}">{{'매수' if t.side=='BUY' else '매도'}}</td><td>{{'{:,.6f}'.format(t.qty)}}</td><td>{{'{:,.4f}'.format(t.price)}}</td><td>{{'{:,.2f}'.format(t.fee)}}</td><td>{{t.source or 'MANUAL'}}</td><td>{{t.order_no or ''}}</td><td>{{t.note or ''}}</td><td class="actions"><a href="{{url_for('portfolio_trade_edit',tid=t.id)}}">수정</a><form method="post" action="{{url_for('portfolio_trade_delete',tid=t.id)}}" onsubmit="return confirm('거래기록을 삭제할까요?')"><button class="link danger">삭제</button></form></td></tr>{% else %}<tr><td colspan="11">거래기록이 없습니다.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

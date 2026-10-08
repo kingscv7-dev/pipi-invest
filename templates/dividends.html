@@ -1,0 +1,54 @@
+{% extends 'base.html' %}{% block content %}
+<div class="hero"><div><h1>배당금 가계부</h1><p>포트폴리오 종목의 실제 배당금을 월별·연도별로 기록하고 세전·세후 실수령액을 관리합니다.</p></div><div class="yearnav"><form method="get"><select name="year" onchange="this.form.submit()">{% for y in years %}<option value="{{y}}" {{'selected' if y==year}}>{{y}}년</option>{% endfor %}</select><input type="hidden" name="month" value="{{month}}"></form></div></div>
+
+<div class="metricgrid dividendmetrics">
+<div class="metric"><span>{{year}}년 세후 배당 · KRW</span><b>₩{{'{:,.0f}'.format(annual.KRW.net)}}</b><small>세전 ₩{{'{:,.0f}'.format(annual.KRW.gross)}} · 세금 ₩{{'{:,.0f}'.format(annual.KRW.tax)}}</small></div>
+<div class="metric"><span>{{year}}년 세후 배당 · USD</span><b>${{'{:,.2f}'.format(annual.USD.net)}}</b><small>세전 ${{'{:,.2f}'.format(annual.USD.gross)}} · 세금 ${{'{:,.2f}'.format(annual.USD.tax)}}</small></div>
+<div class="metric"><span>{{month}}월 세후 배당</span><b>₩{{'{:,.0f}'.format(month_total.KRW)}}</b><small>${{'{:,.2f}'.format(month_total.USD)}}</small></div>
+<div class="metric"><span>KRW 월평균 · 목표</span><b>₩{{'{:,.0f}'.format(avg_krw)}}</b><small>목표 ₩{{'{:,.0f}'.format(target_krw)}} · {{'{:.1f}'.format(progress)}}%</small><div class="progress"><i style="width:{{100 if progress>100 else progress}}%"></i></div></div>
+</div>
+
+<section class="panel nh-panel">
+  <div class="panelhead"><div><h2>NH 배당문자 붙여넣기</h2><p>국내 배당금 입금 안내와 해외증권 권리발생 안내를 자동 판별합니다.</p></div></div>
+  <form method="post" action="{{url_for('dividends_nh_preview')}}" class="nh-paste-form">
+    <textarea name="nh_text" rows="9" placeholder="[NH투자증권] 배당금 입금 안내 또는 해외증권 권리발생 안내 문자를 그대로 붙여넣으세요." required>{{nh_raw or ''}}</textarea>
+    <button class="primary">문자 분석</button>
+  </form>
+  {% if nh_preview %}
+  <div class="nh-preview {{'dup' if nh_preview.duplicate else ''}}">
+    <div class="nh-preview-title"><b>{{nh_preview.kind_label}} 분석 결과</b>{% if nh_preview.duplicate %}<span>중복 기록</span>{% endif %}</div>
+    <div class="nh-preview-grid dividend-preview-grid">
+      <div><span>종목</span><b>{{nh_preview.name}}</b></div>
+      <div><span>통화</span><b>{{nh_preview.currency}}</b></div>
+      {% if nh_preview.base_date %}<div><span>기준일</span><b>{{nh_preview.base_date}}</b></div>{% endif %}
+      <div><span>지급일</span><b>{{nh_preview.pay_date}}</b></div>
+      <div><span>세전</span><b>{{'{:,.4f}'.format(nh_preview.gross)}}</b></div>
+      <div><span>세금</span><b>{{'{:,.4f}'.format(nh_preview.tax)}}</b></div>
+      <div><span>세후 실수령</span><b>{{'{:,.4f}'.format(nh_preview.net)}}</b></div>
+      {% if nh_preview.fee %}<div><span>수수료</span><b>{{'{:,.4f}'.format(nh_preview.fee)}}</b></div>{% endif %}
+    </div>
+    {% if securities %}
+    <form method="post" action="{{url_for('dividends_nh_save')}}" class="nh-save-form dividend-save-form">
+      <input type="hidden" name="gross" value="{{nh_preview.gross}}"><input type="hidden" name="tax" value="{{nh_preview.tax}}"><input type="hidden" name="net" value="{{nh_preview.net}}"><input type="hidden" name="fee" value="{{nh_preview.fee}}"><input type="hidden" name="base_date" value="{{nh_preview.base_date}}"><input type="hidden" name="source_key" value="{{nh_preview.source_key}}"><input type="hidden" name="extra_note" value="{{nh_preview.extra_note}}">
+      <label>저장할 포트폴리오 종목<select name="security_id" required>{% for s in securities %}<option value="{{s.id}}" {{'selected' if nh_preview.matched_security_id==s.id else ''}}>[{{s.account_name}}] {{s.name}} · {{s.symbol}}</option>{% endfor %}</select></label>
+      <label>지급일 <small>{% if nh_preview.kind=='US' %}해외문자에는 날짜가 없어 기본값을 오늘로 둠{% endif %}</small><input name="pay_date" type="date" value="{{nh_preview.pay_date}}" required></label>
+      <button class="primary" {{'disabled' if nh_preview.duplicate else ''}}>배당 가계부에 저장</button>
+    </form>
+    {% else %}<div class="empty">먼저 포트폴리오에 종목을 등록해 주세요.</div>{% endif %}
+  </div>{% endif %}
+</section>
+
+<div class="grid2">
+<section class="panel"><h2>배당금 직접 입력</h2>{% if securities %}<form method="post" action="{{url_for('dividend_add')}}" class="formgrid" id="dividendForm">
+<label>지급일<input name="pay_date" type="date" value="{{today}}" required></label><label>종목<select name="security_id" id="divSecurity">{% for s in securities %}<option value="{{s.id}}" data-currency="{{s.currency}}">[{{s.account_name}}] {{s.name}} · {{s.symbol}}</option>{% endfor %}</select></label>
+<label>보유수량 <small>비우면 지급일 기준 자동</small><input name="shares" id="divShares" type="number" step="0.000001"></label><label>주당 배당금 <small>선택</small><input name="per_share" id="divPerShare" type="number" step="0.0001"></label>
+<label>세전 총액 <small>주당배당×수량이면 비워도 됨</small><input name="gross" id="divGross" type="number" step="0.01"></label><label>세금 <small>비우면 KRW 15.4% / USD 15% 기본</small><input name="tax" id="divTax" type="number" step="0.01"></label>
+<label>세후 실수령 <small>비우면 자동</small><input name="net" id="divNet" type="number" step="0.01"></label><label>메모<input name="note"></label><button class="primary wide">배당금 기록</button></form>{% else %}<div class="empty">포트폴리오에 종목을 먼저 등록해 주세요.</div>{% endif %}</section>
+<section class="panel"><h2>월 배당 목표</h2><form method="post" action="{{url_for('dividend_target')}}" class="targetform"><label>KRW 세후 월평균 목표<input name="target_krw" type="number" step="1000" value="{{target_krw}}"></label><button class="primary">목표 저장</button></form><div class="goalbig"><span>현재 월평균</span><b>₩{{'{:,.0f}'.format(avg_krw)}}</b><small>목표 대비 {{'{:.1f}'.format(progress)}}%</small></div></section>
+</div>
+
+<section class="panel"><div class="panelhead"><div><h2>{{year}}년 월별 배당</h2><p>월을 클릭하면 해당 월의 종목별 배당 내역을 아래에서 확인합니다.</p></div></div><div class="monthgrid">{% for m in range(1,13) %}<a class="monthcard {{'active' if m==month}}" href="{{url_for('dividends',year=year,month=m)}}"><b>{{m}}월</b><span>₩{{'{:,.0f}'.format(monthly[m].KRW)}}</span><small>${{'{:,.2f}'.format(monthly[m].USD)}}</small></a>{% endfor %}</div><div class="chartwrap"><canvas id="dividendChart" height="280"></canvas></div></section>
+
+<section class="panel"><h2>{{year}}년 {{month}}월 상세</h2><div class="scroll"><table><thead><tr><th>지급일</th><th>계좌</th><th>종목</th><th>통화</th><th>수량</th><th>주당배당</th><th>세전</th><th>세금</th><th>세후</th><th>메모</th><th></th></tr></thead><tbody>{% for d in rows %}<tr><td>{{d.pay_date}}</td><td>{{d.account_name}}</td><td><b>{{d.name}}</b><br><small>{{d.symbol}}</small></td><td>{{d.currency}}</td><td>{{'{:,.4f}'.format(d.shares)}}</td><td>{{'{:,.4f}'.format(d.per_share)}}</td><td>{{'{:,.2f}'.format(d.gross)}}</td><td>{{'{:,.2f}'.format(d.tax)}}</td><td class="red"><b>{{'{:,.2f}'.format(d.net)}}</b></td><td>{{d.note or ''}}</td><td class="actions"><a href="{{url_for('dividend_edit',did=d.id)}}">수정</a><form method="post" action="{{url_for('dividend_delete',did=d.id)}}" onsubmit="return confirm('배당기록을 삭제할까요?')"><button class="link danger">삭제</button></form></td></tr>{% else %}<tr><td colspan="11">이 달의 배당 기록이 없습니다.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}
+{% block script %}<script>window.DIVIDEND_DATA={{dividend_chart|tojson}};</script><script src="{{url_for('static',filename='finance.js')}}"></script>{% endblock %}

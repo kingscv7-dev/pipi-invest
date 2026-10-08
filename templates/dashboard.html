@@ -1,0 +1,35 @@
+{% extends 'base.html' %}{% block content %}
+<div class="hero"><div><h1>자산 대시보드</h1><p>VR7과 포트폴리오 보유종목을 원화로 환산해 총자산과 비중을 한눈에 봅니다.</p></div><div class="badge">총자산 ₩{{'{:,.0f}'.format(total_krw)}}</div></div>
+
+<div class="dashboard-layout">
+<section class="panel asset-pie-panel">
+  <div class="panelhead"><div><h2>총자산 비율</h2><p>USD 자산은 현재 저장된 환율로 KRW 환산합니다.</p></div></div>
+  {% if assets %}<div class="donut-wrap"><canvas id="assetPie" width="420" height="420"></canvas><div class="donut-center"><span>총자산</span><b>₩{{'{:,.0f}'.format(total_krw)}}</b></div></div>{% else %}<div class="empty">아직 집계할 자산이 없습니다.</div>{% endif %}
+</section>
+
+<section class="panel">
+  <div class="panelhead"><div><h2>자산 구성</h2><p>VR7은 계좌총액(TQQQ 평가금 + 다음 Pool), 포트폴리오는 현재가 기준 평가금액입니다.</p></div></div>
+  <div class="asset-list">
+  {% for a in assets %}
+    <div class="asset-row" data-asset-key="{{a.key}}">
+      <div class="asset-dot" style="--idx:{{loop.index0}}"></div>
+      <div class="asset-main"><b>{{a.name}}</b><small>{{a.detail}}</small></div>
+      <div class="asset-values">
+        {% if a.currency=='USD' %}<b>${{'{:,.2f}'.format(a.original_value)}}</b><small>약 ₩{{'{:,.0f}'.format(a.krw_value)}}</small>{% else %}<b>₩{{'{:,.0f}'.format(a.original_value)}}</b><small>원화자산</small>{% endif %}
+      </div>
+      <div class="asset-pct">{{'{:.1f}'.format(a.percent)}}%</div>
+    </div>
+  {% else %}<div class="empty">보유자산을 등록하거나 VR 주차를 기록해 주세요.</div>{% endfor %}
+  </div>
+</section>
+</div>
+
+<section class="panel fx-panel">
+  <div class="panelhead"><div><h2>USD/KRW 환율</h2><p>달러자산의 원화 환산에 사용됩니다.{% if fx_updated_at %} · 마지막 반영 {{fx_updated_at}}{% endif %}</p></div></div>
+  <div class="fx-tools">
+    <form method="post" action="{{url_for('dashboard_fx')}}" class="fx-manual"><label>환율<input name="usd_krw" type="number" step="0.01" value="{{'%.2f'|format(usd_krw)}}" required></label><button class="table-btn apply">적용</button></form>
+    <form method="post" action="{{url_for('dashboard_fx_refresh')}}"><button class="table-btn">환율 자동조회</button></form>
+  </div>
+</section>
+{% endblock %}
+{% block script %}<script>window.ASSET_DATA={{assets|tojson}};window.ASSET_TOTAL={{total_krw|tojson}};</script><script src="{{url_for('static',filename='dashboard.js')}}"></script>{% endblock %}

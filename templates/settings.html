@@ -1,0 +1,21 @@
+{% extends 'base.html' %}{% block content %}
+<section class="panel narrow">
+<h1>초기설정</h1>
+<p>VR7 초반 변수구간은 수동으로 기록하고, 예정 주차 틀은 <b>1·3·5·…·269주차</b>로 자동 생성합니다.</p>
+<form method="post" class="formgrid">
+<label>기존 시작일<input type="date" name="start_date" value="{{s.start_date}}"></label>
+<label>1주차 예정 기준일<input type="date" name="plan_start_date" value="{{s.plan_start_date or s.start_date}}"></label>
+<label>자동생성 마지막 주차<input type="number" step="2" min="1" name="plan_end_week" value="{{s.plan_end_week or 269}}"><small>짝수를 입력해도 바로 아래 홀수까지만 생성</small></label>
+<label>주차 간격(일)<input type="number" name="interval_days" value="{{s.interval_days}}"><small>기본 14일</small></label>
+<label>최초 Pool<input type="number" step="0.01" name="initial_pool" value="{{s.initial_pool}}"></label>
+<label>최초 보유수량<input type="number" step="0.0001" name="initial_shares" value="{{s.initial_shares}}"></label>
+<label>최초 순매매원가<input type="number" step="0.01" name="initial_net_trade_cost" value="{{s.initial_net_trade_cost}}"></label>
+<label>최초 누적 투자금<input type="number" step="0.01" name="initial_invested" value="{{s.initial_invested}}"></label>
+<label>기본 추가금<input type="number" step="0.01" name="contribution" value="{{s.contribution}}"></label>
+<label>기본 G<input type="number" step="0.01" name="default_g" value="{{s.default_g}}"></label>
+<label>기본 V최소 배수<input type="number" step="0.01" name="lower_mult" value="{{s.lower_mult}}"></label>
+<label>기본 V최대 배수<input type="number" step="0.01" name="upper_mult" value="{{s.upper_mult}}"></label>
+<button class="primary wide">저장 · 예정 주차 다시 생성</button>
+</form>
+</section>
+{% endblock %}

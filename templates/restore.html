@@ -1,0 +1,3 @@
+{% extends 'base.html' %}{% block content %}
+<section class="card"><h2>DB 복원</h2><p>기존 PC에서 받은 <b>vr7.db</b> 또는 <b>vr7_backup.db</b>를 업로드하면 클라우드 데이터로 교체합니다.</p><form method="post" enctype="multipart/form-data" onsubmit="return confirm('현재 클라우드 DB를 교체할까요? 기존 DB는 서버에 안전백업됩니다.');"><label>DB 파일<input type="file" name="db_file" accept=".db,application/octet-stream" required></label><button type="submit">DB 복원</button></form><p class="muted">복원 전 현재 클라우드 DB는 vr7_before_restore.db로 자동 백업됩니다.</p></section>
+{% endblock %}

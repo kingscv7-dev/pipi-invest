@@ -1,0 +1,60 @@
+{% extends 'base.html' %}{% block content %}
+<div class="hero"><div><h1>VR7 주차 관리</h1><p>1·3·5·…·269주차 틀은 미리 생성하고, 실제 데이터가 들어오면 확정값으로 바뀝니다.</p></div><div class="badges">{% if latest %}<div class="badge">현재 {{latest.week_no}}주차</div>{% endif %}<div class="badge light">예정 {{plan_done}} / {{plan_total}} 확정</div></div></div>
+
+<div class="grid2">
+<section class="panel"><h2>새 주차 기록</h2><form method="post" action="{{url_for('cycle_add')}}" class="formgrid">
+<label>주차<input id="weekNoInput" name="week_no" type="number" min="0" value="{{suggested.week_no}}" required></label>
+<label>종가 기준일<input id="closeDateInput" name="close_date" type="date" value="{{suggested.close_date}}" required onchange="fetchQuoteByDate()"></label>
+<label>V값<input id="vValueInput" name="v_value" type="number" step="0.0001" value="{{'%.4f'|format(suggested.v_value) if suggested.v_value else ''}}" required></label>
+<label>G<input id="gValueInput" name="g_value" type="number" step="0.0001" value="{{suggested.g_value}}" required></label>
+<label>TQQQ 종가 <small id="priceStatus">기준일 종가 자동조회</small><div class="inline"><input id="priceInput" name="close_price" type="number" step="0.0001" readonly><button type="button" class="sub" onclick="fetchQuoteByDate()">자동조회</button><button type="button" class="sub" onclick="toggleManualPrice()">수동입력</button></div></label>
+<label>배당 유입<input name="dividend" type="number" step="0.01" value="0"></label>
+<label>V최소 <small>비우면 V×{{'%.2f'|format(settings.lower_mult)}}</small><input name="v_min" type="number" step="0.0001"></label>
+<label>V최대 <small>비우면 V×{{'%.2f'|format(settings.upper_mult)}}</small><input name="v_max" type="number" step="0.0001"></label>
+<label>다음 주차 추가금<input name="contribution" type="number" step="0.01" value="{{settings.contribution}}"></label>
+<label>메모<input name="note" placeholder="VR7 유료구독 특이사항"></label>
+<button class="primary wide">주차 저장</button></form></section>
+
+<section class="panel"><h2>실제 매매 입력</h2>{% if cycles %}<form method="post" action="{{url_for('trade_add')}}" class="formgrid">
+<label>주차<select name="cycle_id">{% for c in cycles|reverse %}<option value="{{c.id}}">{{c.week_no}}주차 · {{c.close_date}}</option>{% endfor %}</select></label>
+<label>구분<select name="side"><option value="BUY">매수</option><option value="SELL">매도</option></select></label>
+<label>수량<input name="qty" type="number" step="0.0001" required></label><label>체결가<input name="price" type="number" step="0.0001" required></label>
+<label>수수료<input name="fee" type="number" step="0.01" value="0"></label><label>메모<input name="note"></label><button class="primary wide">매매 반영</button></form>{% else %}<div class="empty">먼저 0주차를 저장해 주세요.</div>{% endif %}</section>
+</div>
+
+<section class="panel planpanel">
+<div class="panelhead"><div><h2>예정 주차 틀 · 1 → {{settings.plan_end_week or 269}}주차</h2><p>홀수 주차만 14일 간격으로 미리 생성됩니다. 초반 변수구간의 0주차·짝수주차는 위에서 별도로 수동 기록할 수 있습니다.</p></div><div class="planstat">{{plan_done}} / {{plan_total}}</div></div>
+<div class="scroll plan-scroll"><table><thead><tr><th>상태</th><th>주차</th><th>예정일</th><th>실제일</th><th>V</th><th>평가금</th><th>마지막 Pool</th><th>다음 V</th><th></th></tr></thead><tbody>
+{% for r in plan_rows %}<tr class="{{'confirmed' if r.cycle_id else 'planned'}}"><td>{% if r.cycle_id %}<span class="state done">확정</span>{% else %}<span class="state wait">예정</span>{% endif %}</td><td><b>{{r.week_no}}주차</b></td><td>{{r.planned_date}}</td><td>{{r.actual_date or '-'}}</td><td>{{('$%.2f'|format(r.v_value)) if r.v_value is not none else (('약 $%.2f'|format(r.projected_v)) if r.projected_v is not none else '-')}}</td><td>{{('$%.2f'|format(r.valuation)) if r.valuation is not none else '-'}}</td><td>{{('$%.2f'|format(r.last_pool)) if r.last_pool is not none else '-'}}</td><td>{{('$%.2f'|format(r.next_v)) if r.next_v is not none else '-'}}</td><td>{% if r.cycle_id %}<a href="{{url_for('cycle_edit',cid=r.cycle_id)}}">수정</a>{% else %}<button type="button" class="link planfill" onclick="fillPlanned({{r.week_no}}, '{{r.planned_date}}')">기록</button>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></section>
+
+{% if latest %}
+<section class="sectiontitle"><h2>매매 내용 · {{latest.week_no}}주차</h2></section>
+<div class="grid3">
+<section class="panel summary"><h3>계좌 상황</h3><table class="kv"><tr><td>TQQQ 종가</td><td>${{'%.2f'|format(latest.close_price)}}</td></tr><tr><td>보유 개수</td><td>{{'%.4f'|format(latest.shares_snapshot)}}</td></tr><tr><td>보유 평가금</td><td class="red">${{'%.2f'|format(latest.valuation)}}</td></tr><tr><td>마지막 Pool</td><td class="blue">${{'%.2f'|format(latest.last_pool)}}</td></tr><tr><td>TQQQ 평단</td><td class="red">${{'%.2f'|format(latest.avg_price)}}</td></tr></table></section>
+<section class="panel summary"><h3>Pool 정리</h3><table class="kv"><tr><td>처음 Pool</td><td>${{'%.2f'|format(latest.first_pool)}}</td></tr><tr><td>총매매액</td><td class="green">${{'%.2f'|format(latest.trade_cashflow)}}</td></tr><tr><td>배당</td><td>${{'%.2f'|format(latest.dividend)}}</td></tr><tr><td>마지막 Pool</td><td>${{'%.2f'|format(latest.last_pool)}}</td></tr><tr><td>다음 Pool (+{{'%.0f'|format(latest.contribution)}})</td><td class="blue">${{'%.2f'|format(latest.next_pool)}}</td></tr></table><div class="mix"><div class="pie" style="--p:{{pool_pct}}"></div><div><b>POOL {{'%.2f'|format(pool_pct)}}%</b><br><span>TQQQ {{'%.2f'|format(tqqq_pct)}}%</span></div></div></section>
+<section class="panel summary"><h3>누적 정리</h3><table class="kv"><tr><td>TQQQ 평가금</td><td>${{'%.2f'|format(latest.valuation)}}</td></tr><tr><td>Pool</td><td>${{'%.2f'|format(latest.next_pool)}}</td></tr><tr><td>계좌총액</td><td class="blue">${{'%.2f'|format(latest.account_total)}}</td></tr><tr><td>투자금</td><td class="blue">${{'%.2f'|format(latest.invested)}}</td></tr><tr><td>수익률</td><td class="{{'red' if latest.return_pct>=0 else 'blue'}}">{{'%+.2f'|format(latest.return_pct)}}%</td></tr><tr><td>수익금</td><td class="{{'red' if latest.profit>=0 else 'blue'}}">${{'%+.2f'|format(latest.profit)}}</td></tr></table></section>
+</div>
+
+<section class="panel loc-panel">
+<div class="panelhead"><div><h2>LOC 예약주문 · 매수/매도점</h2><p>다음 거래기간의 V최소·V최대와 현재 보유수량을 기준으로 LOC 잔량주문 가격을 계산합니다.{% if loc_orders %} · {{loc_orders.week_no}}주차 · 기간 {{loc_orders.period_start}} ~ {{loc_orders.period_end}}{% endif %}</p></div>{% if loc_orders %}<div class="loc-head-points"><span>1차 매수점 <b>{{('$%.4f'|format(loc_orders.first_buy.price)) if loc_orders.first_buy else '-'}}</b></span><span>1차 매도점 <b>{{('$%.4f'|format(loc_orders.first_sell.price)) if loc_orders.first_sell else '-'}}</b></span></div>{% endif %}</div>
+{% if loc_orders %}
+<div class="loc-grid">
+  <div class="loc-side buy-side"><h3>LOC 매수점</h3><div class="scroll"><table><thead><tr><th>차수</th><th>체결후 보유</th><th>매수점</th><th>체결후 POOL</th></tr></thead><tbody>{% for r in loc_orders.buys %}<tr><td>{{r.seq}}</td><td>{{'%.4f'|format(r.target_shares)}}주</td><td class="blue"><b>${{'%.4f'|format(r.price)}}</b></td><td class="{{'red' if r.pool_after < 0 else ''}}">${{'%.2f'|format(r.pool_after)}}</td></tr>{% else %}<tr><td colspan="4">보유수량이 없어 LOC 매수점을 계산할 수 없습니다.</td></tr>{% endfor %}</tbody></table></div><small>POOL 기준 ${{'%.2f'|format(loc_orders.pool)}} · 예약주문 생성 중 POOL이 약 ${{'%.2f'|format(loc_orders.reserve_floor)}} 아래로 내려가면 다음 매수단계는 만들지 않습니다.</small></div>
+  <div class="loc-side sell-side"><h3>LOC 매도점</h3><div class="scroll"><table><thead><tr><th>차수</th><th>체결후 보유</th><th>매도점</th><th>체결후 POOL</th></tr></thead><tbody>{% for r in loc_orders.sells %}<tr><td>{{r.seq}}</td><td>{{'%.4f'|format(r.target_shares)}}주</td><td class="red"><b>${{'%.4f'|format(r.price)}}</b></td><td>${{'%.2f'|format(r.pool_after)}}</td></tr>{% else %}<tr><td colspan="4">보유수량이 없어 LOC 매도점을 계산할 수 없습니다.</td></tr>{% endfor %}</tbody></table></div><small>매도는 V최대 ÷ 체결 전 보유수량으로 계산하며 최대 8단계까지 표시합니다.</small></div>
+</div>
+<div class="loc-formula"><b>다음 거래기간 기준</b><span>V ${{'%.2f'|format(loc_orders.v_value)}} · 최소 ${{'%.2f'|format(loc_orders.v_min)}} · 최대 ${{'%.2f'|format(loc_orders.v_max)}}</span><span>시작 POOL ${{'%.2f'|format(loc_orders.pool)}} · 보유 {{'%.4f'|format(loc_orders.shares)}}주</span><span>매수점 = V최소 ÷ 체결 전 보유수량 · 매도점 = V최대 ÷ 체결 전 보유수량</span></div>
+{% else %}<div class="empty">주차를 기록하면 LOC 매수·매도점이 자동 생성됩니다.</div>{% endif %}
+</section>
+
+<section class="panel formula"><h2>다음 V 계산</h2><div class="formulaGrid"><div class="formulaVals"><div><span>마지막 평가금 E</span><b>${{'%.2f'|format(latest.valuation)}}</b></div><div><span>직전 V</span><b>${{'%.2f'|format(latest.v_value)}}</b></div><div><span>마지막 Pool</span><b>${{'%.2f'|format(latest.last_pool)}}</b></div><div><span>추가금</span><b>${{'%.2f'|format(latest.contribution)}}</b></div><div><span>G</span><b>{{'%.2f'|format(latest.g_value)}}</b></div></div><div class="formulaBox"><code>V₂ = V₁ + Pool/G + (E−V₁)/(2√G) + 적립금</code><div class="nextV"><span>다음 V</span><b>{{'%.2f'|format(latest.next_v|default(0,true))}}</b></div></div></div></section>
+
+<section class="panel"><div class="panelhead"><div><h2>평가금 밴드 그래프</h2><p>빨강 실선 = 실제 평가금(확정 주차까지만) · 보라 점선 = V최소 / V최대(예정 269주차까지)</p></div></div><canvas id="valueChart" height="340"></canvas></section>
+<section class="panel"><h2>계좌총액 vs 투자원금</h2><canvas id="accountChart" height="270"></canvas></section>
+{% endif %}
+
+<section class="panel"><h2>주차 기록</h2><div class="scroll"><table><thead><tr><th>주차</th><th>기준일</th><th>V값</th><th>최소</th><th>최대</th><th>거래액</th><th>처음 Pool</th><th>마지막 Pool</th><th>다음 Pool</th><th>평가금</th><th>다음 V</th><th></th></tr></thead><tbody>{% for c in cycles|reverse %}<tr><td><b>{{c.week_no}}주차</b></td><td>{{c.close_date}}</td><td>${{'%.2f'|format(c.v_value)}}</td><td>${{'%.2f'|format(c.v_min)}}</td><td>${{'%.2f'|format(c.v_max)}}</td><td>${{'%.2f'|format(c.trade_cashflow)}}</td><td>${{'%.2f'|format(c.first_pool)}}</td><td>${{'%.2f'|format(c.last_pool)}}</td><td>${{'%.2f'|format(c.next_pool)}}</td><td class="red">${{'%.2f'|format(c.valuation)}}</td><td>${{'%.2f'|format(c.next_v|default(0,true))}}</td><td class="actions"><a href="{{url_for('cycle_edit',cid=c.id)}}">수정</a><form method="post" action="{{url_for('cycle_delete',cid=c.id)}}" onsubmit="return confirm('주차와 해당 매매를 삭제할까요?')"><button class="link danger">삭제</button></form></td></tr>{% else %}<tr><td colspan="12">아직 기록이 없습니다.</td></tr>{% endfor %}</tbody></table></div></section>
+
+<section class="panel"><h2>매매 기록</h2><div class="scroll"><table><thead><tr><th>주차</th><th>구분</th><th>수량</th><th>체결가</th><th>수수료</th><th>메모</th><th></th></tr></thead><tbody>{% for t in trades %}<tr><td>{{t.week_no}}주차</td><td class="{{'blue' if t.side=='BUY' else 'red'}}">{{'매수' if t.side=='BUY' else '매도'}}</td><td>{{t.qty}}</td><td>${{'%.4f'|format(t.price)}}</td><td>${{'%.2f'|format(t.fee)}}</td><td>{{t.note or ''}}</td><td class="actions"><a href="{{url_for('trade_edit',tid=t.id)}}">수정</a><form method="post" action="{{url_for('trade_delete',tid=t.id)}}"><button class="link danger">삭제</button></form></td></tr>{% else %}<tr><td colspan="7">매매 기록 없음</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}
+{% block script %}<script>window.VR_CHART={{chart|tojson}};</script><script src="{{url_for('static',filename='app.js')}}"></script>{% endblock %}
