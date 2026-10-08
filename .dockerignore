@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+vr7.db
+vr7.pid
+vr7_run.log
+.git/
